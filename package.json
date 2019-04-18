@@ -1,0 +1,23 @@
+{
+  "name": "koa-auth-cas",
+  "version": "1.0.0",
+  "description": "koa middleware for cas sso",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hezzze/koa-auth-cas.git"
+  },
+  "keywords": [
+    "sso",
+    "cas"
+  ],
+  "author": "Zeyu He",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/hezzze/koa-auth-cas/issues"
+  },
+  "homepage": "https://github.com/hezzze/koa-auth-cas#readme"
+}
