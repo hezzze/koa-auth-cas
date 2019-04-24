@@ -3,6 +3,7 @@ const url = require('url'),
   https = require('https'),
   parseXML = require('xml2js').parseString,
   XMLprocessors = require('xml2js/lib/processors')
+  ONE_DAY = 24 * 60 * 60 * 1000
 
 /**
  * The CAS authentication types.
@@ -52,7 +53,7 @@ module.exports = class Cas {
 
     if (this.cas_version === '1.0') {
       _validateUri = '/validate'
-      _validate = function (body, callback) {
+      _validate = function(body, callback) {
         var lines = body.split('\n')
         if (lines[0] === 'yes' && lines.length >= 2) {
           return callback(null, lines[1])
@@ -65,10 +66,9 @@ module.exports = class Cas {
     } else if (this.cas_version === '2.0' || this.cas_version === '3.0') {
       _validateUri =
         this.cas_version === '2.0' ? '/serviceValidate' : '/p3/serviceValidate'
-      _validate = function (body, callback) {
+      _validate = function(body, callback) {
         parseXML(
-          body,
-          {
+          body, {
             trim: true,
             normalize: true,
             explicitArray: false,
@@ -77,7 +77,7 @@ module.exports = class Cas {
               XMLprocessors.stripPrefix
             ]
           },
-          function (err, result) {
+          function(err, result) {
             if (err) {
               return callback(new Error('Response from CAS server was bad.'))
             }
@@ -105,56 +105,55 @@ module.exports = class Cas {
       }
     } else if (this.cas_version === 'saml1.1') {
       _validateUri = '/samlValidate'
-      _validate = function (body, callback) {
+      _validate = function(body, callback) {
         parseXML(body, {
-            trim: true,
-            normalize: true,
-            explicitArray: false,
-            tagNameProcessors: [
-              XMLprocessors.normalize,
-              XMLprocessors.stripPrefix
-            ]
-          }, (err, result) => {
-            if (err) {
-              return callback(new Error('Response from CAS server was bad.'))
-            }
-            try {
-              var samlResponse = result.envelope.body.response
-              var success = samlResponse.status.statuscode.$.Value.split(':')[1]
-              if (success !== 'Success') {
-                return callback(
-                  new Error('CAS authentication failed (' + success + ').')
-                )
-              } else {
-                var attributes = {}
-                var attributesArray = samlResponse.assertion.attributestatement.attribute
-                if (!(attributesArray instanceof Array)) {
-                  attributesArray = [attributesArray]
-                }
-                attributesArray.forEach(function (attr) {
-                  var thisAttrValue
-                  if (attr.attributevalue instanceof Array) {
-                    thisAttrValue = []
-                    attr.attributevalue.forEach(function (v) {
-                      thisAttrValue.push(v._)
-                    })
-                  } else {
-                    thisAttrValue = attr.attributevalue._
-                  }
-                  attributes[attr.$.AttributeName] = thisAttrValue
-                })
-                return callback(
-                  null,
-                  samlResponse.assertion.authenticationstatement.subject.nameidentifier,
-                  attributes
-                )
-              }
-            } catch (err) {
-              console.log(err)
-              return callback(new Error('CAS authentication failed.'))
-            }
+          trim: true,
+          normalize: true,
+          explicitArray: false,
+          tagNameProcessors: [
+            XMLprocessors.normalize,
+            XMLprocessors.stripPrefix
+          ]
+        }, (err, result) => {
+          if (err) {
+            return callback(new Error('Response from CAS server was bad.'))
           }
-        )
+          try {
+            var samlResponse = result.envelope.body.response
+            var success = samlResponse.status.statuscode.$.Value.split(':')[1]
+            if (success !== 'Success') {
+              return callback(
+                new Error('CAS authentication failed (' + success + ').')
+              )
+            } else {
+              var attributes = {}
+              var attributesArray = samlResponse.assertion.attributestatement.attribute
+              if (!(attributesArray instanceof Array)) {
+                attributesArray = [attributesArray]
+              }
+              attributesArray.forEach(function(attr) {
+                var thisAttrValue
+                if (attr.attributevalue instanceof Array) {
+                  thisAttrValue = []
+                  attr.attributevalue.forEach(function(v) {
+                    thisAttrValue.push(v._)
+                  })
+                } else {
+                  thisAttrValue = attr.attributevalue._
+                }
+                attributes[attr.$.AttributeName] = thisAttrValue
+              })
+              return callback(
+                null,
+                samlResponse.assertion.authenticationstatement.subject.nameidentifier,
+                attributes
+              )
+            }
+          } catch (err) {
+            console.log(err)
+            return callback(new Error('CAS authentication failed.'))
+          }
+        })
       }
     } else {
       throw new Error(
@@ -186,6 +185,10 @@ module.exports = class Cas {
     this.bounce_redirect = this.bounce_redirect.bind(this)
     this.block = this.block.bind(this)
     this.logout = this.logout.bind(this)
+    this.handle_single_logout = this.handle_single_logout.bind(this)
+
+    // by default single logout is disabled
+    this.single_logout = options.single_logout !== undefined ? !!options.single_logout : false
   }
 
   /**
@@ -223,7 +226,7 @@ module.exports = class Cas {
   logout(ctx, next) {
     // Destroy the entire session if the option is set.
     if (this.destroy_session) {
-      ctx.session.destroy(function (err) {
+      ctx.session.destroy(function(err) {
         if (err) {
           console.log(err)
         }
@@ -239,6 +242,101 @@ module.exports = class Cas {
 
     // Redirect the client to the CAS logout.
     ctx.redirect(this.cas_url + '/logout')
+  }
+
+  /**
+   * handle single logout request from CAS server (type: BACK_CHANNEL)
+   */
+  async handle_single_logout(ctx, next) {
+    if (!this.single_logout) {
+      // only handle SLO request when single_logout is true
+
+      ctx.body = 'ok'
+      return
+    }
+
+    // body.logoutRequest contains the xml saml content for CAS single logout
+    // sample:
+    // <samlp:LogoutRequest xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol"
+    // ID="LR-6-1nEuptR9wGcunDut1kpQrju0" Version="2.0" IssueInstant="2019-04-19T05:37:57Z">
+    // <saml:NameID xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion">sample_id</saml:NameID>
+    // <samlp:SessionIndex>ST-8-E1LBqLsi89XFcxrzvWgqI01SEjY45420fc75be9</samlp:SessionIndex>
+    // </samlp:LogoutRequest>
+    const {
+      logoutRequest
+    } = ctx.request.body
+
+    await new Promise((resolve, reject) => {
+      parseXML(
+        logoutRequest, {
+          trim: true,
+          normalize: true,
+          explicitArray: false,
+          tagNameProcessors: [
+            XMLprocessors.normalize,
+            XMLprocessors.stripPrefix
+          ]
+        },
+        async function(err, result) {
+          console.log(result)
+          if (err) {
+            throw new Error('SLO request from CAS server was bad.')
+          }
+
+          const sessionStore = ctx.session._sessCtx.store
+
+          const st = result.logoutrequest.sessionindex
+          try {
+
+            // NOTES: the extra params here is for compatibility with koa-session method signatures
+            // https://github.com/koajs/session#external-session-stores
+            const sessionResult = await sessionStore.get(st, ONE_DAY, {})
+
+            if (sessionResult && sessionResult.key) {
+              console.log('Find sid by st succeed, trying to destroy it.', 'st', st, 'session externalKey', sessionResult.key);
+
+              try {
+                await sessionStore.destroy(sessionResult.key)
+
+                try {
+                  await sessionStore.destroy(st)
+                  resolve()
+                } catch (e) {
+                  console.log('Error when destroy st in session store. ', st);
+                  console.log(err);
+                  ctx.response.status = 202
+                  resolve()
+                }
+              } catch (e) {
+                console.log('Error when destroy session for key: ', sessionResult.key);
+                console.log(e);
+                ctx.response.status = 202
+                resolve()
+              }
+            } else {
+              console.log('Can not find sid by st: ' + st, sessionResult);
+
+              try {
+                await sessionStore.destroy(st)
+                resolve()
+              } catch (e) {
+                console.log('Error when destroy st in session store. ', st);
+                console.log(err);
+                ctx.response.status = 202
+                resolve()
+              }
+            }
+          } catch (e) {
+            console.log('Trying to ssoff, but get st from session failed!');
+            console.log(e);
+            ctx.response.status = 202
+            resolve()
+          }
+        })
+    })
+
+    // send 200 response
+    ctx.body = 'ok'
   }
 }
 
@@ -303,7 +401,7 @@ function _login(ctx, next) {
   )
 }
 
-const _request = function (requestOptions) {
+const _request = function(requestOptions) {
   return new Promise((resolve, reject) => {
     const request = this.request_client.request(requestOptions, response => {
       response.setEncoding('utf8')
@@ -380,19 +478,46 @@ async function _handleTicket(ctx, next) {
   }
 
   try {
+    console.log(requestOptions)
+
     const body = await _request.bind(this)(requestOptions)
 
-    _validate(body, (err, user, attributes) => {
-      if (err) {
-        console.log(err)
-        ctx.status = 401
-      } else {
-        ctx.session[this.session_name] = user
-        if (this.session_info) {
-          ctx.session[this.session_info] = attributes || {}
+    await new Promise((resolve, reject) => {
+      _validate(body, async(err, user, attributes) => {
+        if (err) {
+          console.log(err)
+          ctx.status = 401
+          resolve()
+        } else {
+          try {
+            const key = ctx.session._sessCtx.externalKey
+            if (this.single_logout) {
+              // only store local session when single logout is enabled
+
+              console.log(`storing local session for SLO, ${ctx.query.ticket}(sso ticket) => { key: ${key} (local session key)}`)
+
+              // NOTES: the extra params here is for compatibility with koa-session method signatures
+              // https://github.com/koajs/session#external-session-stores
+              // https://github.com/HanHyeoksu/koa-session-redis-store/blob/master/lib/redis_store.js#L66
+              await ctx.session._sessCtx.store.set(ctx.query.ticket, {
+                key
+              }, ONE_DAY, {
+                changed: true
+              })
+            }
+
+            ctx.session[this.session_name] = user
+            if (this.session_info) {
+              ctx.session[this.session_info] = attributes || {}
+            }
+            ctx.redirect(ctx.session.cas_return_to)
+            resolve()
+          } catch (e) {
+            console.log(e)
+            resolve()
+          }
         }
-        ctx.redirect(ctx.session.cas_return_to)
-      }
+      })
     })
   } catch (err) {
     console.log('Request error with CAS: ', err)
