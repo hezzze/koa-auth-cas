@@ -1,10 +1,18 @@
+## CHNAGELOG
+
+v1.1.0
+- BETA: added support for single logout
+
+v1.0.0
+- modifications to support CAS 6.0.x
+
+---
+
 Adopted from Donny2333's implementation of the middleware https://github.com/Donny2333/koa2-sso
 
 tweak for Apereo CAS 6.0.x
 
 ---
-#### original readme
-
 # Koa CAS Authentication
 
 This is a CAS authentication library designed to be used with an Koa server.
@@ -38,7 +46,8 @@ const cas = new Cas({
   dev_mode_info: {},
   session_name: 'cas_user',
   session_info: 'cas_userinfo',
-  destroy_session: false
+  destroy_session: false,
+  single_logout: false
 })
 ```
 
@@ -56,6 +65,7 @@ const cas = new Cas({
 | session_name | _string_ | The name of the session variable that will store the CAS user once they are authenticated. | _"cas_user"_ |
 | session_info | _string_ | The name of the session variable that will store the CAS user information once they are authenticated. If set to false (or something that evaluates as false), the additional information supplied by the CAS will not be forwarded. This will not work with CAS 1.0, as it does not support additional user information. | _false_ |
 | destroy_session | _boolean_ | If true, the logout function will destroy the entire session upon CAS logout. Otherwise, it will only delete the session variable storing the CAS user. | _false_ |
+| single_logout | _boolean_ | (BETA FEATURE): If true, single logout will be enabled, external store needed be configured for koa session, (e.g. redis store via `koa-session-redis-store`) | _false_ |
 
 ## Usage
 
@@ -63,11 +73,17 @@ const cas = new Cas({
 const Koa = require('koa')
 const Router = require('koa-router')
 const Session = require('koa-session')
-const Cas = require('koa2-cas')
+const Cas = require('koa-auth-cas')
+const RedisStore = require('koa-session-redis-store')
 
 // Set up an Koa session, which is required for CASAuthentication.
 app.keys = ['some secret hurr']
-app.use(Session(app))
+app.use(Session({
+  key: 'my-session-key',
+  store: new RedisStore({
+    host: 'my-redis-host'
+  })
+}))
 
 // Create a new instance of CASAuthentication.
 const cas = new Cas({
@@ -104,6 +120,10 @@ router.get('/authenticate', cas.bounce_redirect)
 // This route will de-authenticate the client with the Koa server and then
 // redirect the client to the CAS logout page.
 router.get('/logout', cas.logout)
+
+// This route will handle the SLO POST request from CAS server and
+// destroy local session
+router.post('/single_logout', cas.handle_single_logout)
 
 app.use(router.routes())
 
