@@ -179,6 +179,7 @@ module.exports = class Cas {
     this.session_name = options.session_name !== undefined ? options.session_name : 'cas_user'
     this.session_info = ['2.0', '3.0', 'saml1.1'].indexOf(this.cas_version) >= 0 && options.session_info !== undefined ? options.session_info : false
     this.destroy_session = options.destroy_session !== undefined ? !!options.destroy_session : false
+    this.logout_redirect_url = options.logout_redirect_url
 
     // Bind the prototype routing methods to this instance of CASAuthentication.
     this.bounce = this.bounce.bind(this)
@@ -240,8 +241,11 @@ module.exports = class Cas {
       }
     }
 
+    var query = ''
+    if (this.logout_redirect_url) query = `service=${this.logout_redirect_url}`
+
     // Redirect the client to the CAS logout.
-    ctx.redirect(this.cas_url + '/logout')
+    ctx.redirect(this.cas_url + `/logout?${query}`)
   }
 
   /**

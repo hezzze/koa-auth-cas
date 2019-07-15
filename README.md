@@ -1,4 +1,6 @@
 ## CHNAGELOG
+v1.1.1
+- added logout redirect support
 
 v1.1.0
 - BETA: added support for single logout
@@ -66,6 +68,7 @@ const cas = new Cas({
 | session_info | _string_ | The name of the session variable that will store the CAS user information once they are authenticated. If set to false (or something that evaluates as false), the additional information supplied by the CAS will not be forwarded. This will not work with CAS 1.0, as it does not support additional user information. | _false_ |
 | destroy_session | _boolean_ | If true, the logout function will destroy the entire session upon CAS logout. Otherwise, it will only delete the session variable storing the CAS user. | _false_ |
 | single_logout | _boolean_ | (BETA FEATURE): If true, single logout will be enabled, external store needed be configured for koa session, (e.g. redis store via `koa-session-redis-store`) | _false_ |
+| logout_redirect_url | _string_ | redirect to this url after logout | _""_ |
 
 ## Usage
 
